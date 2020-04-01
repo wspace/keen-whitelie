@@ -1,0 +1,3922 @@
+# Heap layout
+#      0/1            1/1
+# +----------+--------------------+-
+# | readchar | parse number/label |
+# +----------+--------------------+-
+#          2/1          3/1            4/1             5/1               6/1            7/1
+# -+--------------+------------+-----------------+---------------+----------------+--------------+-
+#  | start of ops | top of ops | start of labels | top of labels | start of mcode | top of mcode |
+# -+--------------+------------+-----------------+---------------+----------------+--------------+-
+#        8/l       8+l/m     8+l+m/n
+# -+------------+--------+--------------+
+#  | parsed ops | labels | machine code |
+# -+------------+--------+--------------+
+# where ops forms | op | arg |
+# ops:
+#  0x00 push
+#  0x01 dup
+#  0x02 copy
+#  0x03 swap
+#  0x04 discard
+#  0x05 slide
+#  0x10 add
+#  0x11 sub
+#  0x12 mul
+#  0x13 div
+#  0x14 mod
+#  0x20 store
+#  0x21 retrieve
+#  0x30 label
+#  0x31 call
+#  0x32 jump
+#  0x33 jz
+#  0x34 jneg
+#  0x35 return
+#  0x36 end
+#  0x40 outchar
+#  0x41 outnumber
+#  0x42 readchar
+#  0x43 readnumber
+
+
+Flow call 0x00 # main
+Flow end
+
+# fn 0x00
+# main {
+Flow label 0x00
+  # init start/top of ops
+  Stack push 0x02
+  Stack push 0x08
+  Heap store
+  Stack push 0x03
+  Stack push 0x08
+  Heap store
+
+  Flow call 0x10 # parseInstAll
+
+  # init start/top of labels
+  Stack push 0x04
+  Stack push 0x03
+  Heap retrieve
+  Heap store
+  Stack push 0x05
+  Stack push 0x03
+  Heap retrieve
+  Heap store
+
+  Flow call 0xd0 # collectLabelsAndRewrite
+
+  # Flow call 0xb0 # dumpOps
+  # Flow end
+  # init start/top of mcode
+  Stack push 0x06
+  Stack push 0x05
+  Heap retrieve
+  Heap store
+  Stack push 0x07
+  Stack push 0x05
+  Heap retrieve
+  Heap store
+
+  # initialize labels
+  Flow call 0xf0 # asmCode
+
+
+  # reset top of mcode and run asmCode again
+  Stack push 0x07
+  Stack push 0x06
+  Heap retrieve
+  Heap store
+  Flow call 0xf0 # asmCode
+
+  Flow call 0x130 # dumpELF
+  Flow return
+# }
+
+
+# fn 0x10
+# parseInstAll {
+Flow label 0x10
+  Stack push 0
+  Stack push 0
+  Heap store
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x11
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x12
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x13
+  # end of file
+  Stack push 0
+  Heap retrieve
+  Flow jz 0x14
+  # else
+  # ignore
+  Flow jump 0x10
+
+  # s -> Stack
+  Flow label 0x11
+    Flow call 0x20 # parseInstStack
+    Flow jump 0x10
+
+  # ts -> Arith
+  # tt -> Heap
+  # tn -> IO
+  Flow label 0x12
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x15
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x16
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x17
+    # else
+    # ignore
+    Flow jump 0x10
+
+    # s -> Arith
+    Flow label 0x15
+      Flow call 0x30 # parseInstArith
+      Flow jump 0x10
+
+    # t -> Heap
+    Flow label 0x16
+      Flow call 0x40 # parseInstHeap
+      Flow jump 0x10
+
+    # n -> IO
+    Flow label 0x17
+      Flow call 0x50 # parseInstIO
+      Flow jump 0x10
+
+  # n -> Flow
+  Flow label 0x13
+      Flow call 0x60 # parseInstFlow
+      Flow jump 0x10
+
+
+  # 0x00 -> return
+  Flow label 0x14
+      Flow return
+# }
+
+# fn 0x20
+# parseInstStack {
+Flow label 0x20
+  Stack push 0
+  Stack push 0
+  Heap store
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x21
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x22
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x23
+  # else
+  Flow jump 0x20
+
+  # s -> push
+  Flow label 0x21
+    Stack push 0x00
+    Flow call 0x70 # parseNum
+    Flow call 0xa0 # addOp
+    Flow return
+
+  # ts -> copy
+  # tn -> slide
+  Flow label 0x22
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x24
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x25
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x26
+    # else
+    # ignore
+    Flow jump 0x22
+
+    # s -> copy
+    Flow label 0x24
+      Stack push 0x02
+      Flow call 0x70 # parseNum
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> unkwown
+    Flow label 0x25
+      Stack push 's'
+      Flow call 0x90 # unknownInst
+      Flow return
+
+    # n -> slide
+    Flow label 0x26
+      Stack push 0x05
+      Flow call 0x70 # parseNum
+      Flow call 0xa0 # addOp
+      Flow return
+
+
+  # ns -> dup
+  # nt -> swap
+  # nn -> discard
+  Flow label 0x23
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x27
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x28
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x29
+    # else
+    # ignore
+    Flow jump 0x23
+
+    # s -> dup
+    Flow label 0x27
+      Stack push 0x01
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> swap
+    Flow label 0x28
+      Stack push 0x03
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # n -> discard
+    Flow label 0x29
+      Stack push 0x04
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+# }
+
+# fn 0x30
+# parseInstArith {
+Flow label 0x30
+  Stack push 0
+  Stack push 0
+  Heap store
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x31
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x32
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x33
+  # else
+  Flow jump 0x30
+
+  # ss -> add
+  # st -> sub
+  # sn -> mul
+  Flow label 0x31
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x34
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x35
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x36
+    # else
+    # ignore
+    Flow jump 0x31
+
+    # s -> add
+    Flow label 0x34
+      Stack push 0x10
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> sub
+    Flow label 0x35
+      Stack push 0x11
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # n -> mul
+    Flow label 0x36
+      Stack push 0x12
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+  # ts -> div
+  # tt -> mod
+  Flow label 0x32
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x37
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x38
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x39
+    # else
+    Stack push 'a'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+    # s -> div
+    Flow label 0x37
+      Stack push 0x13
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> mod
+    Flow label 0x38
+      Stack push 0x14
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # n -> unknown
+    Flow label 0x39
+      Stack push 'a'
+      Flow call 0x90 # unknownInst
+      Flow return
+
+  # n -> unknown
+  Flow label 0x33
+    Stack push 'a'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+# }
+
+# fn 0x40
+# parseInstHeap {
+Flow label 0x40
+  Stack push 0
+  Stack push 0
+  Heap store
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x41
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x42
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x43
+  # else
+  # ignore
+  Flow jump 0x40
+
+  # s -> store
+  Flow label 0x41
+    Stack push 0x20
+    Stack push 0x00
+    Flow call 0xa0 # addOp
+    Flow return
+
+  # t -> retrieve
+  Flow label 0x42
+    Stack push 0x21
+    Stack push 0x00
+    Flow call 0xa0 # addOp
+    Flow return
+
+  # n -> unknown
+  Flow label 0x43
+    Stack push 'h'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+# }
+
+# fn 0x50
+# parseInstIO {
+Flow label 0x50
+  Stack push 0
+  Stack push 0
+  Heap store
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x51
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x52
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x43
+  # else
+  # ignore
+  Flow jump 0x50
+
+  # ss -> output
+  # st -> outputnum
+  Flow label 0x51
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x54
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x55
+    # else
+    Stack push 'I'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+    # s -> output
+    Flow label 0x54
+      Stack push 0x40
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> outputnum
+    Flow label 0x55
+      Stack push 0x41
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+  # ts -> readchar
+  # tt -> readnum
+  Flow label 0x52
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x56
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x57
+    # else
+    Stack push 'I'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+    # s -> readchar
+    Flow label 0x56
+      Stack push 0x42
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> readnum
+    Flow label 0x57
+      Stack push 0x43
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+  # n -> unknown
+  Flow label 0x53
+    Stack push 'I'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+# }
+
+# fn 0x60
+# parseInstFlow {
+Flow label 0x60
+  Stack push 0
+  Stack push 0
+  Heap store
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x61
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x62
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x63
+  # else
+  # ignore
+  Flow jump 0x60
+
+  # ss -> label
+  # st -> call
+  # sn -> jump
+  Flow label 0x61
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x64
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x65
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x66
+    # else
+    # ignore
+    Flow jump 0x61
+
+    # s -> label
+    Flow label 0x64
+      Stack push 0x30
+      Flow call 0x80 # parseLabel
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> call
+    Flow label 0x65
+      Stack push 0x31
+      Flow call 0x80 # parseLabel
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # n -> jump
+    Flow label 0x66
+      Stack push 0x32
+      Flow call 0x80 # parseLabel
+      Flow call 0xa0 # addOp
+      Flow return
+
+  # ts -> jz
+  # tt -> jneg
+  # tn -> return
+  Flow label 0x62
+     Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x67
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x68
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x69
+    # else
+    # ignore
+    Flow jump 0x62
+
+    # s -> jz
+    Flow label 0x67
+      Stack push 0x33
+      Flow call 0x80 # parseLabel
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # t -> jneg
+    Flow label 0x68
+      Stack push 0x34
+      Flow call 0x80 # parseLabel
+      Flow call 0xa0 # addOp
+      Flow return
+
+    # n -> return
+    Flow label 0x69
+      Stack push 0x35
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+
+  # nn -> end
+  Flow label 0x63
+    Stack push 0
+    Stack push 0
+    Heap store
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x6a
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x6b
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x6c
+    # else
+    Flow jump 0x63
+
+   # s -> unknown
+   Flow label 0x6a
+    Stack push 'f'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+   # t -> unknown
+   Flow label 0x6b
+    Stack push 'f'
+    Flow call 0x90 # unknownInst
+    Flow return
+
+    # n -> end
+    Flow label 0x6c
+      Stack push 0x36
+      Stack push 0x00
+      Flow call 0xa0 # addOp
+      Flow return
+# }
+
+
+# TODO: parse sign
+# fn 0x70
+# parseNum -> num {
+Flow label 0x70
+  Stack push 1
+  Stack push 0
+  Heap store
+
+  # parse sign
+  Stack push 0
+  IO readchar
+  # space
+  Stack push 0
+  Heap retrieve
+  Stack push 0x20
+  Arith sub
+  Flow jz 0x75
+  # tab
+  Stack push 0
+  Heap retrieve
+  Stack push 0x09
+  Arith sub
+  Flow jz 0x76
+  # newline
+  Stack push 0
+  Heap retrieve
+  Stack push 0x0a
+  Arith sub
+  Flow jz 0x77
+  # else
+  Flow jump 0x70
+
+  # s
+  Flow label 0x75
+    Stack push 1
+    Flow jump 0x71
+
+  # t
+  Flow label 0x76
+    Stack push -1
+    Flow jump 0x71
+
+  # n
+  Flow label 0x77
+    Stack push 0
+    Flow return
+
+  # loop
+  Flow label 0x71
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x72
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x73
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x74
+    # else
+    Flow jump 0x71
+
+    # s
+    Flow label 0x72
+      Stack push 1
+      Heap retrieve
+      Stack push 2
+      Arith mul
+      Stack push 1
+      Stack swap
+      Heap store
+      Flow jump 0x71
+
+    # t
+    Flow label 0x73
+      Stack push 1
+      Heap retrieve
+      Stack push 2
+      Arith mul
+      Stack push 1
+      Arith add
+      Stack push 1
+      Stack swap
+      Heap store
+      Flow jump 0x71
+
+    # n
+    Flow label 0x74
+      Stack push 1
+      Heap retrieve
+      Arith mul
+      Flow return
+# }
+
+# fn 0x80
+# parseLabel -> label {
+Flow label 0x80
+  Stack push 1
+  Stack push 0
+  Heap store
+  # loop
+  Flow label 0x81
+    Stack push 0
+    IO readchar
+    # space
+    Stack push 0
+    Heap retrieve
+    Stack push 0x20
+    Arith sub
+    Flow jz 0x82
+    # tab
+    Stack push 0
+    Heap retrieve
+    Stack push 0x09
+    Arith sub
+    Flow jz 0x83
+    # newline
+    Stack push 0
+    Heap retrieve
+    Stack push 0x0a
+    Arith sub
+    Flow jz 0x84
+    # else
+    Flow jump 0x81
+
+    # s
+    Flow label 0x82
+      Stack push 1
+      Heap retrieve
+      Stack push 2
+      Arith mul
+      Stack push 1
+      Stack swap
+      Heap store
+      Flow jump 0x81
+
+    # t
+    Flow label 0x83
+      Stack push 1
+      Heap retrieve
+      Stack push 2
+      Arith mul
+      Stack push 1
+      Arith add
+      Stack push 1
+      Stack swap
+      Heap store
+      Flow jump 0x81
+
+    # n
+    Flow label 0x84
+      Stack push 1
+      Heap retrieve
+      Flow return
+# }
+
+# fn 0x90
+# unknownInst(marker) {
+Flow label 0x90
+  Stack push 'u'
+  IO outchar
+  Stack push 'n'
+  IO outchar
+  Stack push 'k'
+  IO outchar
+  Stack push 'n'
+  IO outchar
+  Stack push 'o'
+  IO outchar
+  Stack push 'w'
+  IO outchar
+  Stack push 'n'
+  IO outchar
+  Stack push 0x20
+  IO outchar
+  IO outchar
+  Stack push '\n'
+  IO outchar
+  Flow return
+# }
+
+# fn 0xa0
+# addOp(arg, op) {
+Flow label 0xa0
+  Stack push 0x03
+  Heap retrieve
+  Stack dup
+  Stack copy 3
+  # | arg | op | top | top | arg
+  Heap store # store arg
+
+  Stack push 1
+  Arith add
+  Stack dup
+  Stack copy 2
+  # | arg | op | top+1 | top+1 | op
+  Heap store # store op
+
+  Stack push 1
+  Arith add
+  Stack push 0x03
+  Stack swap
+  Heap store
+  Stack discard
+  Stack discard
+  Flow return
+# }
+
+# fn 0xb0
+# dumpOps {
+Flow label 0xb0
+  # load local variables
+  # top of ops
+  Stack push 0x03
+  Heap retrieve
+  # start of ops
+  Stack push 0x02
+  Heap retrieve
+
+  # | top | start
+
+  Flow label 0xb1
+    Stack dup
+    Stack copy 2
+    Arith sub
+    Flow jz 0xb2
+
+    Stack dup
+    Heap retrieve
+    # | top | start | op
+
+    Stack dup
+    Stack push 0x00
+    Arith sub
+    Flow jz 0xb3
+    Stack dup
+    Stack push 0x01
+    Arith sub
+    Flow jz 0xb4
+    Stack dup
+    Stack push 0x02
+    Arith sub
+    Flow jz 0xb5
+    Stack dup
+    Stack push 0x03
+    Arith sub
+    Flow jz 0xb6
+    Stack dup
+    Stack push 0x04
+    Arith sub
+    Flow jz 0xb7
+    Stack dup
+    Stack push 0x05
+    Arith sub
+    Flow jz 0xb8
+    Stack dup
+    Stack push 0x10
+    Arith sub
+    Flow jz 0xb9
+    Stack dup
+    Stack push 0x11
+    Arith sub
+    Flow jz 0xba
+    Stack dup
+    Stack push 0x12
+    Arith sub
+    Flow jz 0xbb
+    Stack dup
+    Stack push 0x13
+    Arith sub
+    Flow jz 0xbc
+    Stack dup
+    Stack push 0x14
+    Arith sub
+    Flow jz 0xbd
+    Stack dup
+    Stack push 0x20
+    Arith sub
+    Flow jz 0xbe
+    Stack dup
+    Stack push 0x21
+    Arith sub
+    Flow jz 0xbf
+    Stack dup
+    Stack push 0x30
+    Arith sub
+    Flow jz 0xc0
+    Stack dup
+    Stack push 0x31
+    Arith sub
+    Flow jz 0xc1
+    Stack dup
+    Stack push 0x32
+    Arith sub
+    Flow jz 0xc2
+    Stack dup
+    Stack push 0x33
+    Arith sub
+    Flow jz 0xc3
+    Stack dup
+    Stack push 0x34
+    Arith sub
+    Flow jz 0xc4
+    Stack dup
+    Stack push 0x35
+    Arith sub
+    Flow jz 0xc5
+    Stack dup
+    Stack push 0x36
+    Arith sub
+    Flow jz 0xc6
+    Stack dup
+    Stack push 0x40
+    Arith sub
+    Flow jz 0xc7
+    Stack dup
+    Stack push 0x41
+    Arith sub
+    Flow jz 0xc8
+    Stack dup
+    Stack push 0x42
+    Arith sub
+    Flow jz 0xc9
+    Stack dup
+    Stack push 0x43
+    Arith sub
+    Flow jz 0xca
+    # unreachable
+    Flow jump 0xce
+
+    # push
+    Flow label 0xb3
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'p'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 's'
+      IO outchar
+      Stack push 'h'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # dup
+    Flow label 0xb4
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'd'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'p'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # copy
+    Flow label 0xb5
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'c'
+      IO outchar
+      Stack push 'o'
+      IO outchar
+      Stack push 'p'
+      IO outchar
+      Stack push 'y'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+
+    # swap
+    Flow label 0xb6
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 's'
+      IO outchar
+      Stack push 'w'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'p'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # discard
+    Flow label 0xb7
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'd'
+      IO outchar
+      Stack push 'i'
+      IO outchar
+      Stack push 's'
+      IO outchar
+      Stack push 'c'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'r'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # slide
+    Flow label 0xb8
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 's'
+      IO outchar
+      Stack push 'l'
+      IO outchar
+      Stack push 'i'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # add
+    Flow label 0xb9
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'a'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # sub
+    Flow label 0xba
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 's'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'b'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # mul
+    Flow label 0xbb
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'm'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'l'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # div
+    Flow label 0xbc
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'd'
+      IO outchar
+      Stack push 'i'
+      IO outchar
+      Stack push 'v'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # mod
+    Flow label 0xbd
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'm'
+      IO outchar
+      Stack push 'o'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # store
+    Flow label 0xbe
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 's'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 'o'
+      IO outchar
+      Stack push 'r'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # retrieve
+    Flow label 0xbf
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'r'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 'r'
+      IO outchar
+      Stack push 'i'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 'v'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # label
+    Flow label 0xc0
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'l'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'b'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 'l'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # call
+    Flow label 0xc1
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'c'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'l'
+      IO outchar
+      Stack push 'l'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # jump
+    Flow label 0xc2
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'j'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'm'
+      IO outchar
+      Stack push 'p'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # jz
+    Flow label 0xc3
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'j'
+      IO outchar
+      Stack push 'z'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # jneg
+    Flow label 0xc4
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'j'
+      IO outchar
+      Stack push 'n'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 'g'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      Stack dup
+      Heap retrieve
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # return
+    Flow label 0xc5
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'r'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'r'
+      IO outchar
+      Stack push 'n'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # end
+    Flow label 0xc6
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'e'
+      IO outchar
+      Stack push 'n'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # outchar
+    Flow label 0xc7
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'o'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 'p'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # outnumber
+    Flow label 0xc8
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'o'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 'p'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 'n'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'm'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # readchar
+    Flow label 0xc9
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'r'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push 'c'
+      IO outchar
+      Stack push 'h'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'r'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # readnumber
+    Flow label 0xca
+      Stack discard
+      Stack push 1
+      Arith add
+      Stack push 'r'
+      IO outchar
+      Stack push 'e'
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 'd'
+      IO outchar
+      Stack push 'n'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'm'
+      IO outchar
+      Stack push '\n'
+      IO outchar
+      Flow jump 0xcb
+
+    # end of loop
+    Flow label 0xcb
+      Stack push 1
+      Arith add
+      Flow jump 0xb1
+
+    # unreachable: error
+    Flow label 0xce
+      Stack push 'b'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'g'
+      IO outchar
+      Stack push ':'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      # op
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow end
+
+  Flow label 0xb2
+    Stack discard
+    Stack discard
+    Flow return
+# }
+
+# fn 0xd0
+# collectAndRewriteLabels {
+# 1. collect labels
+# 2. rename labels of arbitrary numbers to the index of found order
+Flow label 0xd0
+  Stack push 0x03
+  Heap retrieve
+  Stack push 0x02
+  Heap retrieve
+  # | top of ops | start of ops
+
+  Flow label 0xd1
+    Stack copy 1
+    Stack copy 1
+    Arith sub
+    Flow jz 0xd2
+
+    Stack dup
+    Heap retrieve
+
+    Stack push 0x30 # label
+    Arith sub
+    Flow jz 0xd3
+
+    Stack dup
+    Heap retrieve
+    Stack push 0x31 # call
+    Arith sub
+    Flow jz 0xd3
+
+    Stack dup
+    Heap retrieve
+    Stack push 0x32 # jump
+    Arith sub
+    Flow jz 0xd3
+
+    Stack dup
+    Heap retrieve
+    Stack push 0x33 # jz
+    Arith sub
+    Flow jz 0xd3
+
+    Stack dup
+    Heap retrieve
+    Stack push 0x34 # jneg
+    Arith sub
+    Flow jz 0xd3
+
+    # else
+    Flow jump 0xd4
+
+    Flow label 0xd3
+      # | top | start
+      Stack push 1
+      Arith add
+      Stack dup
+      Heap retrieve
+      Stack dup
+      # | top | start + 1 | label | label
+      Flow call 0xe0 # findLabel
+      Stack dup
+      Flow jneg 0xd5
+      # found existing label
+        # | top | start + 1 | label | pos
+        Stack swap
+        Stack discard
+        # | top | start + 1 | pos
+        Stack copy 1
+        Stack swap
+        Heap store
+        Stack push 1
+        Arith add
+        Flow jump 0xd1
+
+      # no existing labels
+      Flow label 0xd5
+        # | top | start + 1 | label | -1
+        Stack discard
+        # rewrite existing label
+        Stack copy 1
+        Stack push 0x05
+        Heap retrieve
+        Stack push 0x04
+        Heap retrieve
+        Arith sub
+        # | top | start + 1 | label | start + 1 | top of label - start of label
+        Heap store
+
+        # register a new label
+        Stack push 0x05
+        Heap retrieve
+        Stack dup
+        # | top | start of ops + 1 | label | top of labels | top of labels
+        Stack copy 2
+        Heap store
+        Stack push 0x05
+        Stack swap
+        Stack push 1
+        Arith add
+        # | top | start of ops + 1 | label | 5 | top of labels + 1
+        Heap store
+        Stack discard
+        # | top | start of ops + 1
+        Stack push 1
+        Arith add
+        Flow jump 0xd1
+
+    Flow label 0xd4
+      Stack push 2
+      Arith add
+      Flow jump 0xd1
+
+  Flow label 0xd2
+    Stack discard
+    Stack discard
+    Flow return
+# }
+
+# fn 0xe0
+# findLabel(label) -> pos {
+Flow label 0xe0
+  Stack push 0x05
+  Heap retrieve
+  Stack push 0x04
+  Heap retrieve
+  Stack push 0 # i = 0
+  # | label | top | start | i
+  Flow label 0xe1
+    Stack copy 2
+    Stack copy 2
+    Stack copy 2
+    Arith add
+    Arith sub
+    Flow jz 0xe2 # start + i = top
+    Stack copy 1
+    Stack copy 1
+    Arith add
+    Heap retrieve
+    # | label | top | start | i | labels[i]
+    Stack copy 4
+    Arith sub
+    Flow jz 0xe3 # labels[i] = label
+    Stack push 1
+    Arith add
+    Flow jump 0xe1
+
+    # label was found
+    Flow label 0xe3
+      # | label | top | start | i
+      Stack slide 3
+      Flow return
+
+  # label wasn't found
+  Flow label 0xe2
+    # | label | top | start | i
+    Stack push -1
+    Stack slide 4
+    Flow return
+# }
+
+## runtime architecture
+# runtime heap map
+#
+# +------------+-------------+-   -+---------------+
+# | ws heap -> | ws stack -> | ... | <- call stack |
+# +------------+-------------+-   -+---------------+
+# registers
+#     rbp ... base of ws heap
+#     rbx ... top of ws stack
+#     rsp ... ordinal rsp.
+#   and some registers are used to hold temporal values
+# values
+#   all values are 64-bit
+
+# PROT_READ | PROT_WRITE = 3
+# MAP_ANONYMOUS = 0x20
+
+# fn 0xf0
+# asmCode {
+Flow label 0xf0
+  # load local variables
+  # top of ops
+  Stack push 0x03
+  Heap retrieve
+  # start of ops
+  Stack push 0x02
+  Heap retrieve
+
+  # alloc stack:
+  #   mmap(NULL, 0x00400000, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)
+  # mov rax, 9
+  # b8 09 00 00 00
+  Stack push 0xb8
+  Stack push 0x09
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # mov rdi, 0
+  # bf 00 00 00 00
+  Stack push 0xbf
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # mov rsi, 0x00400000
+  # be 00 00 40 00
+  Stack push 0xbe
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x40
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # ; PROT_READ | PROT_WRITE
+  # mov rdx, 3
+  # ba 03 00 00 00
+  Stack push 0xba
+  Stack push 0x03
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # ; MAP_ANONYMOUS
+  # mov r10, 0x22
+  # 41 ba 22 00 00 00
+  Stack push 0x41
+  Stack push 0xba
+  Stack push 0x22
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 6
+  Flow call 0x120 # storeMCode
+  # mov r8, -1
+  # 49 c7 c0 ff ff ff ff
+  Stack push 0x49
+  Stack push 0xc7
+  Stack push 0xc0
+  Stack push 0xff
+  Stack push 0xff
+  Stack push 0xff
+  Stack push 0xff
+  Stack push 7
+  Flow call 0x120 # storeMCode
+  # mov r9, 0
+  # 41 b8 00 00 00 00
+  Stack push 0x41
+  Stack push 0xb9
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 6
+  Flow call 0x120 # storeMCode
+  # syscall
+  # 0f 05
+  Stack push 0x0f
+  Stack push 0x05
+  Stack push 2
+  Flow call 0x120 # storeMCode
+  # initialize rbx, rbp
+  # mov rbx, rax
+  # 48 89 c3
+  Stack push 0x48
+  Stack push 0x89
+  Stack push 0xc3
+  Stack push 3
+  Flow call 0x120 # storeMCode
+
+  # alloc heap:
+  #   mmap(NULL, 0x00400000, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)
+  # mov rax, 9
+  # b8 09 00 00 00
+  Stack push 0xb8
+  Stack push 0x09
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # mov rdi, 0
+  # bf 00 00 00 00
+  Stack push 0xbf
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # mov rsi, 0x00400000
+  # be 00 00 40 00
+  Stack push 0xbe
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x40
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # ; PROT_READ | PROT_WRITE
+  # mov rdx, 3
+  # ba 03 00 00 00
+  Stack push 0xba
+  Stack push 0x03
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 5
+  Flow call 0x120 # storeMCode
+  # ; MAP_ANONYMOUS
+  # mov r10, 0x22
+  # 41 ba 22 00 00 00
+  Stack push 0x41
+  Stack push 0xba
+  Stack push 0x22
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 6
+  Flow call 0x120 # storeMCode
+  # mov r8, -1
+  # 49 c7 c0 ff ff ff ff
+  Stack push 0x49
+  Stack push 0xc7
+  Stack push 0xc0
+  Stack push 0xff
+  Stack push 0xff
+  Stack push 0xff
+  Stack push 0xff
+  Stack push 7
+  Flow call 0x120 # storeMCode
+  # mov r9, 0
+  # 41 b8 00 00 00 00
+  Stack push 0x41
+  Stack push 0xb9
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 0x00
+  Stack push 6
+  Flow call 0x120 # storeMCode
+  # syscall
+  # 0f 05
+  Stack push 0x0f
+  Stack push 0x05
+  Stack push 2
+  Flow call 0x120 # storeMCode
+  # mov rbp, rax
+  # 48 89 c3
+  Stack push 0x48
+  Stack push 0x89
+  Stack push 0xc5
+  Stack push 3
+  Flow call 0x120 # storeMCode
+
+  # | top | start
+
+  Flow label 0xf1
+    Stack dup
+    Stack copy 2
+    Arith sub
+    Flow jz 0xf2
+
+    Stack dup
+    Heap retrieve
+    # | top | start | op
+
+    Stack dup
+    Stack push 0x00
+    Arith sub
+    Flow jz 0xf3
+    Stack dup
+    Stack push 0x01
+    Arith sub
+    Flow jz 0xf4
+    Stack dup
+    Stack push 0x02
+    Arith sub
+    Flow jz 0xf5
+    Stack dup
+    Stack push 0x03
+    Arith sub
+    Flow jz 0xf6
+    Stack dup
+    Stack push 0x04
+    Arith sub
+    Flow jz 0xf7
+    Stack dup
+    Stack push 0x05
+    Arith sub
+    Flow jz 0xf8
+    Stack dup
+    Stack push 0x10
+    Arith sub
+    Flow jz 0xf9
+    Stack dup
+    Stack push 0x11
+    Arith sub
+    Flow jz 0xfa
+    Stack dup
+    Stack push 0x12
+    Arith sub
+    Flow jz 0xfb
+    Stack dup
+    Stack push 0x13
+    Arith sub
+    Flow jz 0xfc
+    Stack dup
+    Stack push 0x14
+    Arith sub
+    Flow jz 0xfd
+    Stack dup
+    Stack push 0x20
+    Arith sub
+    Flow jz 0xfe
+    Stack dup
+    Stack push 0x21
+    Arith sub
+    Flow jz 0xff
+    Stack dup
+    Stack push 0x30
+    Arith sub
+    Flow jz 0x100
+    Stack dup
+    Stack push 0x31
+    Arith sub
+    Flow jz 0x101
+    Stack dup
+    Stack push 0x32
+    Arith sub
+    Flow jz 0x102
+    Stack dup
+    Stack push 0x33
+    Arith sub
+    Flow jz 0x103
+    Stack dup
+    Stack push 0x34
+    Arith sub
+    Flow jz 0x104
+    Stack dup
+    Stack push 0x35
+    Arith sub
+    Flow jz 0x105
+    Stack dup
+    Stack push 0x36
+    Arith sub
+    Flow jz 0x106
+    Stack dup
+    Stack push 0x40
+    Arith sub
+    Flow jz 0x107
+    Stack dup
+    Stack push 0x41
+    Arith sub
+    Flow jz 0x108
+    Stack dup
+    Stack push 0x42
+    Arith sub
+    Flow jz 0x109
+    Stack dup
+    Stack push 0x43
+    Arith sub
+    Flow jz 0x10a
+    # unreachable
+    Flow jump 0x10e
+
+    # push
+    Flow label 0xf3
+      Stack discard
+      Stack push 1
+      Arith add
+      # mov QWORD PTR [rbx], arg
+      # 48 c7 03 xx xx xx xx
+      Stack push 0x48
+      Stack push 0xc7
+      Stack push 0x03
+      Stack copy 3
+      Heap retrieve
+      Flow call 0x110 # decodeLE
+      Stack push 7
+      Flow call 0x120 # storeMCode
+      # add rbx, 0x08
+      # 48 83 c3 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xc3
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # dup
+    Flow label 0xf4
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD[rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # stoceMCode
+
+      # mov QWORD[rbx], rax
+      # 48 89 03
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x03
+      Stack push 3
+      Flow call 0x120 # stoceMCode
+
+      # add rbx, 8
+      # 48 83 c3 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xc3
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # stoceMCode
+
+      Flow jump 0x10b
+
+    # copy
+    Flow label 0xf5
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, n+1
+      # b8 xx xx xx xx
+      Stack push 0xb8
+      Stack copy 1
+      Heap retrieve
+      Stack push 1
+      Arith add
+      Flow call 0x110 # decodeLE
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # neg rax
+      # 48 f7 d8
+      Stack push 0x48
+      Stack push 0xf7
+      Stack push 0xd8
+      Stack push 3
+      Flow call 0x120 # storeMCode
+
+      # mov rax, QWORD[rbx+8*rax]
+      # 48 8b 04 c3
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x04
+      Stack push 0xc3
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      # mov QWORD[rbx], rax
+      # 48 89 03
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x03
+      Stack push 3
+      Flow call 0x120 # storeMCode
+
+      # add rbx, 8
+      # 48 83 c3 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xc3
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+
+    # swap
+    Flow label 0xf6
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov rdx, QWORD [rbx-16]
+      # 48 8b 53 f4
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x53
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD [rbx-16], rax
+      # 48 89 43 f0
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD [rbx-8], rdx
+      # 48 89 53 f8
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x53
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # discard
+    Flow label 0xf7
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # slide
+    Flow label 0xf8
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8n
+      # 48 83 eb 8n
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack copy 3
+      Heap retrieve
+      Stack push 8
+      Arith mul
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD [rbx-8], rax
+      # 48 89 43 f8
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # add
+    Flow label 0xf9
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # add [rbx-16], rax
+      # 48 01 43 f0
+      Stack push 0x48
+      Stack push 0x01
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # sub
+    Flow label 0xfa
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov [rbx-8], rax
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub [rbx-16], rax
+      # 48 29 43 f0
+      Stack push 0x48
+      Stack push 0x29
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # mul
+    Flow label 0xfb
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD[rbx-16]
+      # 48 8b 43 f0
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mul QWORD[rbx-8]
+      # 48 f7 63 f8
+      Stack push 0x48
+      Stack push 0xf7
+      Stack push 0x63
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD[rbx-16], rax
+      # 48 89 43 f0
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # div
+    Flow label 0xfc
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD[rbx-16]
+      # 48 8b 43 f0
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # xor rdx, rdx
+      # 48 31 d2
+      Stack push 0x48
+      Stack push 0x31
+      Stack push 0xd2
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      # div QWORD[rbx-8]
+      # 48 f7 73 f8
+      Stack push 0x48
+      Stack push 0xf7
+      Stack push 0x73
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD[rbx-16], rax
+      # 48 89 43 f0
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # mod
+    Flow label 0xfd
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD[rbx-16]
+      # 48 8b 43 f0
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # xor rdx, rdx
+      # 48 31 d2
+      Stack push 0x48
+      Stack push 0x31
+      Stack push 0xd2
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      # div QWORD[rbx-8]
+      # 48 f7 73 f8
+      Stack push 0x48
+      Stack push 0xf7
+      Stack push 0x73
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD[rbx-16], rdx
+      # 48 89 53 f0
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x53
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # store
+    Flow label 0xfe
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD[rbx-16]
+      # 48 8b 43 f0
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf0
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov rdx, QWORD[rbx-8]
+      # 48 8b 53 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x53
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov QWORD[rbp+8*rax], rdx
+      # 48 89 54 c5 00
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x54
+      Stack push 0xc5
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # sub rbx, 16
+      # 48 83 eb 10
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x10
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # retrieve
+    Flow label 0xff
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, QWORD [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov rax, QWORD [rbp+8*rax]
+      # 48 8b 44 c5 00
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x44
+      Stack push 0xc5
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # mov QWORD[rbx-8],rax
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # label
+    Flow label 0x100
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # record current position in mcode
+      Stack dup
+      Heap retrieve
+      Stack push 0x04
+      Heap retrieve
+      Arith add
+      # | top | start + 1 | label position
+      Stack push 0x07
+      Heap retrieve
+      Stack push 0x06
+      Heap retrieve
+      Arith sub
+
+      Heap store
+      Flow jump 0x10b
+
+    # call
+    Flow label 0x101
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # call near (label position - (current position + 5))
+      # e8 xx xx xx xx
+      Stack push 0xe8
+
+      Stack copy 1
+      Heap retrieve
+      Stack push 0x04
+      Heap retrieve
+      Arith add
+      Heap retrieve   # label position
+      Stack push 0x07
+      Heap retrieve
+      Stack push 0x06
+      Heap retrieve
+      Arith sub       # current position
+      Stack push 5    # 5
+      Arith add
+      Arith sub
+      Flow call 0x110 # decodeLE
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      Flow jump 0x10b
+
+    # jump
+    Flow label 0x102
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # jmp near (label position - (current position + 5))
+      # e9 xx xx xx xx
+      Stack push 0xe9
+
+      Stack copy 1
+      Heap retrieve
+      Stack push 0x04
+      Heap retrieve
+      Arith add
+      Heap retrieve   # label position
+      Stack push 0x07
+      Heap retrieve
+      Stack push 0x06
+      Heap retrieve
+      Arith sub       # current position
+      Stack push 5    # 5
+      Arith add
+      Arith sub
+      Flow call 0x110 # decodeLE
+      Stack push 5
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # jz
+    Flow label 0x103
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # cmp rax, 0
+      # 48 83 f8 00
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xf8
+      Stack push 0x00
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # je near (label position - (current position + 6))
+      # 0f 84 xx xx xx xx
+      Stack push 0x0f
+      Stack push 0x84
+
+      Stack copy 2
+      Heap retrieve
+      Stack push 0x04
+      Heap retrieve
+      Arith add
+      Heap retrieve   # label position
+      Stack push 0x07
+      Heap retrieve
+      Stack push 0x06
+      Heap retrieve
+      Arith sub       # current position
+      Stack push 6    # 6
+      Arith add
+      Arith sub
+      Flow call 0x110 # decodeLE
+      Stack push 6
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # jneg
+    Flow label 0x104
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rax, [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # cmp rax, 0
+      # 48 83 f8 00
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xf8
+      Stack push 0x00
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # jl near (label position - (current position + 6))
+      # 0f 8c xx xx xx xx
+      Stack push 0x0f
+      Stack push 0x8c
+
+      Stack copy 2
+      Heap retrieve
+      Stack push 0x04
+      Heap retrieve
+      Arith add
+      Heap retrieve   # label position
+      Stack push 0x07
+      Heap retrieve
+      Stack push 0x06
+      Heap retrieve
+      Arith sub       # current position
+      Stack push 6    # 6
+      Arith add
+      Arith sub
+      Flow call 0x110 # decodeLE
+      Stack push 6
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # return
+    Flow label 0x105
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # ret
+      # c3
+      Stack push 0xc3
+      Stack push 1
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # end
+    Flow label 0x106
+      Stack discard
+      Stack push 1
+      Arith add
+      # call exit
+      # mov rax, 60
+      # b8 3c 00 00 00
+      Stack push 0xb8
+      Stack push 0x3c
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # mov rd1, 0
+      # bf 09 00 00 00
+      Stack push 0xbf
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # syscall
+      Stack push 0x0f
+      Stack push 0x05
+      Stack push 2
+      Flow call 0x120 # storeMCode
+      Flow jump 0x10b
+
+    # outchar
+    Flow label 0x107
+      Stack discard
+      Stack push 1
+      Arith add
+      # mov rdi, 1
+      # bf 01 00 00 00
+      Stack push 0xbf
+      Stack push 0x01
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 04
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # mov rsi, rbx
+      # 48 89 de
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0xde
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      # mov rdx, 1
+      # ba 01 00 00 00
+      Stack push 0xba
+      Stack push 0x01
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call  0x120 # storeMCode
+      # mov rax, 1
+      # b8 01 00 00 00
+      Stack push 0xb8
+      Stack push 0x01
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call  0x120 # storeMCode
+      # syscall
+      # 0f 05
+      Stack push 0x0f
+      Stack push 0x05
+      Stack push 2
+      Flow call  0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # outnumber
+    Flow label 0x108
+      Stack discard
+      Stack push 1
+      Arith add
+
+      #     mov rax, [rbx-8]
+      # 48 8b 43 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x43
+      Stack push 0xf8
+      Stack push 4
+      Flow call  0x120 # storeMCode
+      #     mov rcx, 10
+      # b9 0a 00 00 00
+      Stack push 0xb9
+      Stack push 0x0a
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call  0x120 # storeMCode
+      #     mov rdi, 12
+      # bf 0c 00 00 00
+      Stack push 0xbf
+      Stack push 0x0c
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call  0x120 # storeMCode
+      # itoa:
+      #     xor rdx, rdx
+      # 48 31 d2
+      Stack push 0x48
+      Stack push 0x31
+      Stack push 0xd2
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     div rcx
+      # 48 f7 f1
+      Stack push 0x48
+      Stack push 0xf7
+      Stack push 0xf1
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     add rdx, '0'
+      # 48 83 c2 30
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xc2
+      Stack push 0x30
+      Stack push 4
+      Flow call  0x120 # storeMCode
+      #     mov byte [rbx+rdi], dl
+      # 88 14 3b
+      Stack push 0x88
+      Stack push 0x14
+      Stack push 0x3b
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     cmp rax, 0
+      # 48 83 f8 00
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xf8
+      Stack push 0x00
+      Stack push 4
+      Flow call  0x120 # storeMCode
+      #     je .end
+      # 74 05
+      Stack push 0x74
+      Stack push 0x05
+      Stack push 2
+      Flow call  0x120 # storeMCode
+      #     dec rdi
+      # 48 ff cf
+      Stack push 0x48
+      Stack push 0xff
+      Stack push 0xcf
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     jmp itoa
+      # eb e8
+      Stack push 0xeb
+      Stack push 0xe8
+      Stack push 2
+      Flow call  0x120 # storeMCode
+      # .end:
+      #     mov rdx, rdi
+      # 48 89 fa
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0xfa
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     mov rdi, 1
+      # bf 00 00 00 00
+      Stack push 0xbf
+      Stack push 0x01
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call  0x120 # storeMCode
+      #     mov rsi, rbx
+      # 48 89 de
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0xde
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     add rsi, rdx
+      # 48 01 d6
+      Stack push 0x48
+      Stack push 0x01
+      Stack push 0xd6
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     sub rdx, 13
+      # 48 83 ea 0c
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xea
+      Stack push 0x0d
+      Stack push 4
+      Flow call  0x120 # storeMCode
+      #     neg rdx
+      # 48 f7 da
+      Stack push 0x48
+      Stack push 0xf7
+      Stack push 0xda
+      Stack push 3
+      Flow call  0x120 # storeMCode
+      #     mov rax, 1
+      # b8 01 00 00 00
+      Stack push 0xb8
+      Stack push 0x01
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call  0x120 # storeMCode
+      #     syscall
+      # 0f 05
+      Stack push 0x0f
+      Stack push 0x05
+      Stack push 2
+      Flow call  0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # readchar
+    Flow label 0x109
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rdi, 0
+      # bf 00 00 00 00
+      Stack push 0xbf
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # mov rsi, QWORD[rbx-8]
+      # 48 8b 73 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x73
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # shl rsi, 3
+      # 48 c1 e6 03
+      Stack push 0x48
+      Stack push 0xc1
+      Stack push 0xe6
+      Stack push 0x03
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      # add rsi, rbp
+      # 48 01 ee
+      Stack push 0x48
+      Stack push 0x01
+      Stack push 0xee
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      # mov rdx, 1
+      # ba 01 00 00 00
+      Stack push 0xba
+      Stack push 0x01
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # mov rax, 0
+      # b8 00 00 00 00
+      Stack push 0xb8
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # syscall
+      # 0f 05
+      Stack push 0x0f
+      Stack push 0x05
+      Stack push 2
+      Flow call 0x120 # storeMCode
+      # sub rbx, 8
+      # 48 83 eb 8
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # readnumber
+    Flow label 0x10a
+      Stack discard
+      Stack push 1
+      Arith add
+
+      # mov rdi, 0
+      # bf 00 00 00 00
+      Stack push 0xbf
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # mov rsi, rbx
+      # 48 89 de
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0xde
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      # mov rdx, 10
+      # ba 01 00 00 00
+      Stack push 0xba
+      Stack push 0x0a
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # mov rax, 0
+      # b8 00 00 00 00
+      Stack push 0xb8
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      # syscall
+      # 0f 05
+      Stack push 0x0f
+      Stack push 0x05
+      Stack push 2
+      Flow call 0x120 # storeMCode
+
+      # https://stackoverflow.com/questions/19461476/convert-string-to-int-x86-32-bit-assembler-using-nasm
+      #     mov rdx, rbx
+      # 48 89 ea
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0xda
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      # atoi:
+      #     xor rax, rax ; zero a "result so far"
+      # 48 31 c0
+      Stack push 0x48
+      Stack push 0x31
+      Stack push 0xc0
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      # .top:
+      #     movzx rcx, byte [rdx] ; get a character
+      # 48 0f b6 0a
+      Stack push 0x48
+      Stack push 0x0f
+      Stack push 0xb6
+      Stack push 0x0a
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      #     inc rdx ; ready for next one
+      # 48 ff c2
+      Stack push 0x48
+      Stack push 0xff
+      Stack push 0xc2
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      #     cmp rcx, '0' ; valid?
+      # 48 83 f9 30
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xf9
+      Stack push 0x30
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      #     jb .done
+      # 72 13
+      Stack push 0x72
+      Stack push 0x13
+      Stack push 2
+      Flow call 0x120 # storeMCode
+      #     cmp rcx, '9'
+      # 48 83 f9 39
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xf9
+      Stack push 0x39
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      #     ja .done
+      # 77 0d
+      Stack push 0x77
+      Stack push 0x0d
+      Stack push 2
+      Flow call 0x120 # storeMCode
+      #     sub rcx, '0' ; "convert" character to number
+      # 48 83 e9 30
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xe9
+      Stack push 0x30
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      #     imul rax, 10 ; multiply "result so far" by ten
+      # 48 6b c0 0a
+      Stack push 0x48
+      Stack push 0x6b
+      Stack push 0xc0
+      Stack push 0x0a
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      #     add rax, rcx ; add in current digit
+      # 48 01 c8
+      Stack push 0x48
+      Stack push 0x01
+      Stack push 0xc8
+      Stack push 3
+      Flow call 0x120 # storeMCode
+      #     jmp .top ; until done
+      # eb e0
+      Stack push 0xeb
+      Stack push 0xe0
+      Stack push 2
+      Flow call 0x120 # storeMCode
+      # .done:
+      #     mov rdx, [rbx-8]
+      # 48 8b 53 f8
+      Stack push 0x48
+      Stack push 0x8b
+      Stack push 0x53
+      Stack push 0xf8
+      Stack push 4
+      Flow call 0x120 # storeMCode
+      #     mov [rbp+8*rdx], rax
+      # 48 89 44 d5 00
+      Stack push 0x48
+      Stack push 0x89
+      Stack push 0x44
+      Stack push 0xd5
+      Stack push 0x00
+      Stack push 5
+      Flow call 0x120 # storeMCode
+      #     sub rbx, 8
+      # 48 83 eb 08
+      Stack push 0x48
+      Stack push 0x83
+      Stack push 0xeb
+      Stack push 0x08
+      Stack push 4
+      Flow call 0x120 # storeMCode
+
+      Flow jump 0x10b
+
+    # end of loop
+    Flow label 0x10b
+      Stack push 1
+      Arith add
+      Flow jump 0xf1
+
+    # unreachable: error
+    Flow label 0x10e
+      Stack push 'b'
+      IO outchar
+      Stack push 'u'
+      IO outchar
+      Stack push 'g'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      # op
+      IO outnumber
+      Stack push 0x20
+      IO outchar
+      Stack push 'a'
+      IO outchar
+      Stack push 't'
+      IO outchar
+      Stack push 0x20
+      IO outchar
+      # start
+      IO outnumber
+      Stack push '\n'
+      IO outchar
+      Flow end
+
+  Flow label 0xf2
+    # call exit
+    # mov rax, 60
+    # b8 3c 00 00 00
+    Stack push 0xb8
+    Stack push 0x3c
+    Stack push 0x00
+    Stack push 0x00
+    Stack push 0x00
+    Stack push 5
+    Flow call 0x120 # storeMCode
+    # mov rd1, 0
+    # bf 09 00 00 00
+    Stack push 0xbf
+    Stack push 0x00
+    Stack push 0x00
+    Stack push 0x00
+    Stack push 0x00
+    Stack push 5
+    Flow call 0x120 # storeMCode
+    # syscall
+    Stack push 0x0f
+    Stack push 0x05
+    Stack push 2
+    Flow call 0x120 # storeMCode
+
+    Stack discard
+    Stack discard
+    Flow return
+
+# }
+
+# fn 0x110
+# decodeLE(int) -> [char, char, char, char] {
+Flow label 0x110
+  # | int
+  Stack dup
+  Stack push 0x100
+  Arith mod
+  Stack swap
+  Stack push 0x100
+  Arith div
+
+  # | 1st byte | rest
+  Stack dup
+  Stack push 0x100
+  Arith mod
+  Stack swap
+  Stack push 0x100
+  Arith div
+
+  # | 1st byte | 2nd byte | rest
+  Stack dup
+  Stack push 0x100
+  Arith mod
+  Stack swap
+  Stack push 0x100
+  Arith div
+
+  # | 1st byte | 2nd byte | 3rd byte | rest
+  Flow return
+# }
+
+# fn 0x120
+# storeMCode([ops], nops) {
+Flow label 0x120
+  # store nops
+  Stack push 0x00
+  Stack copy 1
+  Heap store
+
+  Stack push 0x07
+  Heap retrieve
+  Stack swap
+  # | op | .. | op | top of mcode | nops
+
+  Flow label 0x121
+    Stack dup
+    Flow jz 0x122
+    Stack push 1
+    Arith sub
+    Stack dup
+    Stack copy 2
+    Arith add
+    Stack copy 3
+    # | op | .. | op | top of mcode | nops - 1 | top + nops - 1 | op
+    Heap store
+    # trick to drop the last op
+    Stack push 0x01
+    Stack swap
+    Heap store
+    Stack swap
+    Stack discard
+    Stack push 0x01
+    Heap retrieve
+
+    Flow jump 0x121
+
+  Flow label 0x122
+    # | top of mcode | 0
+    Stack discard
+    Stack discard
+    # increase top of mcode
+    Stack push x00
+    Heap retrieve
+    Stack push 0x07
+    Heap retrieve
+    Arith add
+    Stack push 0x07
+    Stack swap
+    Heap store
+    Flow return
+# }
+
+# fn 0x130
+# dumpELF {
+Flow label 0x130
+  Stack push 0x07
+  Heap retrieve
+  Stack push 0x06
+  Heap retrieve
+  Arith sub
+  Flow call 0x140 # elfHeader
+  Stack push 0x07
+  Heap retrieve
+  Stack push 0x06
+  Heap retrieve
+
+  Flow label 0x131
+    # | top | start
+    Stack copy 1
+    Stack copy 1
+    Arith sub
+    Flow jz 0x132
+
+    Stack dup
+    Heap retrieve
+    IO outchar
+
+    Stack push 1
+    Arith add
+    Flow jump 0x131
+
+  Flow label 0x132
+    Flow return
+# }
+
+# fn 0x140
+# elfHeader(size) {
+Flow label 0x140
+  ### File Header ###
+  # Magic Number of Header
+  Stack push 0x7f
+  IO outchar
+  Stack push 0x45
+  IO outchar
+  Stack push 0x4c
+  IO outchar
+  Stack push 0x46
+  IO outchar
+  # class (32-bit or 64-bit)
+  ## 64-bit
+  Stack push 0x02
+  IO outchar
+  # endian (1 = little, 2 = big)
+  ## little
+  Stack push 0x01
+  IO outchar
+  # version
+  Stack push 0x01
+  IO outchar
+  # System ABI
+  ## System V
+  Stack push 0x00
+  IO outchar
+  # ABI version
+  ## let it blank
+  Stack push 0x00
+  IO outchar
+  # unused
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # type
+  ## EXEC
+  Stack push 0x02
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # machine
+  ## amd64
+  Stack push 0x3e
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # version
+  Stack push 0x01
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # entry
+  Stack push 0xb0
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # start of program header table
+  ## immediately after header
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # start of section header table
+  ## leave it null
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # flags
+  ## leave it blank
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # size of this header
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # the size of program header table entry
+  ## fixed for 64-bit
+  Stack push 0x38
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # the number of program header table
+  Stack push 0x02
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # the size of a section header table entry.
+  ## fixed for 64-bit
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # the number of entries in the section header table.
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # index of the section header table entry that contains the section names.
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+
+  #### Program Header
+
+  ## 1. program header itself
+  # type of segment
+  ## load
+  Stack push 0x06
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # flag
+  ## readable(0x04)
+  Stack push 0x04
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # offset of segment in the file image
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # virtual address of the segment in memory
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # physical address
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # size in file image
+  Stack push 0x70
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # size in memory
+  Stack push 0x70
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # align
+  Stack push 0x80
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+
+  ## 2. load program
+  # type of segment
+  ## load
+  Stack push 0x01
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # flag
+  ## executable (0x01) & readable(0x04)
+  Stack push 0x05
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # offset of segment in the file image
+  ## whole file
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # virtual address of the segment in memory
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # physical address
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x40
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # size in file image
+  Stack dup
+  Flow call 0x110 # decodeLE
+  Stack copy 3
+  IO outchar
+  Stack copy 2
+  IO outchar
+  Stack copy 1
+  IO outchar
+  Stack copy 0
+  IO outchar
+  Stack push 0x01
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # size in memory
+  Stack copy 3
+  IO outchar
+  Stack copy 2
+  IO outchar
+  Stack copy 1
+  IO outchar
+  Stack copy 0
+  IO outchar
+  Stack discard
+  Stack discard
+  Stack discard
+  Stack discard
+  Stack push 0x01
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  # align
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x20
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+  Stack push 0x00
+  IO outchar
+
+  ### program ###
+
+
+  Flow return
+# }
