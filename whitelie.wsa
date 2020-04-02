@@ -3497,6 +3497,10 @@ Flow label 0x130
 # fn 0x140
 # elfHeader(size) {
 Flow label 0x140
+  # add header size
+  Stack push 0xa8
+  Arith add
+
   ### File Header ###
   # Magic Number of Header
   Stack push 0x7f
@@ -3868,7 +3872,7 @@ Flow label 0x140
   IO outchar
   Stack copy 0
   IO outchar
-  Stack push 0x01
+  Stack push 0x00
   IO outchar
   Stack push 0x00
   IO outchar
@@ -3889,7 +3893,7 @@ Flow label 0x140
   Stack discard
   Stack discard
   Stack discard
-  Stack push 0x01
+  Stack push 0x00
   IO outchar
   Stack push 0x00
   IO outchar
